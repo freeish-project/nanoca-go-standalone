@@ -1,0 +1,21 @@
+# Private keys -- never commit
+*.key
+*.p12
+*.pem
+
+# Go binaries
+nanoca-server/nanoca-server
+fleet-acme-enroll/fleet-acme-enroll
+
+# macOS
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
+
+# Claude Code
+.claude/
+
+# Context files
+HANDOFF_CONTEXT.md

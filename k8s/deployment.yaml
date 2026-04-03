@@ -1,0 +1,143 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nanoca-server
+  namespace: security-infra
+  labels:
+    app: nanoca-server
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: nanoca-server
+  template:
+    metadata:
+      labels:
+        app: nanoca-server
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        fsGroup: 65534
+
+      containers:
+        # nanoca ACME CA server
+        - name: nanoca-server
+          image: ghcr.io/YOURORG/nanoca-server:latest
+          ports:
+            - containerPort: 8443
+              name: https
+              protocol: TCP
+          env:
+            - name: NANOCA_LISTEN
+              valueFrom:
+                configMapKeyRef:
+                  name: nanoca-config
+                  key: NANOCA_LISTEN
+            - name: NANOCA_BASE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: nanoca-config
+                  key: NANOCA_BASE_URL
+            - name: NANOCA_DATA_DIR
+              valueFrom:
+                configMapKeyRef:
+                  name: nanoca-config
+                  key: NANOCA_DATA_DIR
+            - name: NANOCA_ENABLE_TPM
+              valueFrom:
+                configMapKeyRef:
+                  name: nanoca-config
+                  key: NANOCA_ENABLE_TPM
+            - name: NANOCA_PREFIX
+              valueFrom:
+                configMapKeyRef:
+                  name: nanoca-config
+                  key: NANOCA_PREFIX
+            - name: NANOCA_FLEET_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: nanoca-config
+                  key: NANOCA_FLEET_URL
+            - name: NANOCA_FLEET_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: nanoca-secrets
+                  key: NANOCA_FLEET_TOKEN
+            # CA cert/key loaded from file paths (volume-mounted Secret)
+            # Defaults match the mount path: /etc/nanoca/ca.pem, /etc/nanoca/ca.key
+          volumeMounts:
+            - name: ca-certs
+              mountPath: /etc/nanoca
+              readOnly: true
+            - name: tpm-cache
+              mountPath: /var/lib/nanoca/tpm-roots
+            - name: tmp
+              mountPath: /tmp
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8443
+            failureThreshold: 30
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8443
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8443
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+
+        # Cloudflare Tunnel sidecar
+        # Routes traffic from Cloudflare network to localhost:8443 in the pod.
+        # Configure the tunnel hostname -> localhost:8443 in Cloudflare dashboard.
+        - name: cloudflared
+          image: cloudflare/cloudflared:latest
+          args: ["tunnel", "--no-autoupdate", "run"]
+          env:
+            - name: TUNNEL_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: nanoca-secrets
+                  key: CLOUDFLARE_TUNNEL_TOKEN
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "200m"
+              memory: "256Mi"
+
+      volumes:
+        # CA cert/key from Secret, projected as files.
+        # Only ca.pem and ca.key are mounted (not the token keys).
+        - name: ca-certs
+          secret:
+            secretName: nanoca-secrets
+            items:
+              - key: ca.pem
+                path: ca.pem
+              - key: ca.key
+                path: ca.key
+                mode: 0400
+        # Pod-local cache for TPM vendor root CAs.
+        # Survives container restarts but wiped on pod reschedule.
+        # FetchRoots re-populates on startup; daily refresh keeps it current.
+        - name: tpm-cache
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}

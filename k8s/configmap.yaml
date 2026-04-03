@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nanoca-config
+  namespace: security-infra
+data:
+  NANOCA_FLEET_URL: "https://fleet.YOURDOMAIN.COM"
+  NANOCA_BASE_URL: "https://ca.YOURDOMAIN.COM"
+  NANOCA_LISTEN: ":8443"
+  NANOCA_DATA_DIR: ""          # empty = in-memory Badger (stateless replicas)
+  NANOCA_ENABLE_TPM: "true"
+  NANOCA_PREFIX: "/acme"

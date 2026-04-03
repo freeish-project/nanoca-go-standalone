@@ -1,0 +1,10 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: nanoca-server
+  namespace: security-infra
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: nanoca-server
