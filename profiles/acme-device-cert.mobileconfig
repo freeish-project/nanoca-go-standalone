@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  ACME device identity certificate via nanoca with Managed Device Attestation.
+  macOS handles the entire ACME flow automatically: key generation in the
+  Secure Enclave, device-attest-01 challenge via Apple's attestation servers,
+  and cert installation into the system keychain.
+
+  Requirements:
+  - macOS 14+ on Apple Silicon or T2 Mac (for Attest + HardwareBound)
+  - nanoca running and reachable at the DirectoryURL
+  - Device must be MDM-enrolled (Fleet Premium) and supervised via ADE/DEP
+
+  Reference: https://support.apple.com/guide/deployment/automated-certificate-management-environment-depb95c66a07/web
+-->
+<plist version="1.0">
+<dict>
+    <key>PayloadContent</key>
+    <array>
+        <dict>
+            <key>DirectoryURL</key>
+            <string>https://ca.YOURDOMAIN.COM/acme/directory</string>
+            <key>ClientIdentifier</key>
+            <string>$SERIALNUMBER</string>
+            <key>Attest</key>
+            <true/>
+            <key>HardwareBound</key>
+            <true/>
+            <key>KeyType</key>
+            <string>ECSECPrimeRandom</string>
+            <key>KeySize</key>
+            <integer>256</integer>
+            <key>Subject</key>
+            <array>
+                <array>
+                    <array>
+                        <string>CN</string>
+                        <string>$SERIALNUMBER</string>
+                    </array>
+                </array>
+            </array>
+            <key>UsageFlags</key>
+            <integer>5</integer>
+            <key>ExtendedKeyUsage</key>
+            <array>
+                <string>1.3.6.1.5.5.7.3.2</string>
+            </array>
+            <key>KeyIsExtractable</key>
+            <false/>
+            <key>AllowAllAppsAccess</key>
+            <true/>
+            <key>PayloadDisplayName</key>
+            <string>Device Identity Certificate (nanoca)</string>
+            <key>PayloadIdentifier</key>
+            <string>com.YOURORG.acme-device-cert</string>
+            <key>PayloadType</key>
+            <string>com.apple.security.acme</string>
+            <key>PayloadUUID</key>
+            <string>GENERATE-UUID-HERE</string>
+            <key>PayloadVersion</key>
+            <integer>1</integer>
+        </dict>
+    </array>
+    <key>PayloadDisplayName</key>
+    <string>ACME Device Identity Certificate</string>
+    <key>PayloadIdentifier</key>
+    <string>com.YOURORG.acme-device-cert.profile</string>
+    <key>PayloadScope</key>
+    <string>System</string>
+    <key>PayloadType</key>
+    <string>Configuration</string>
+    <key>PayloadUUID</key>
+    <string>GENERATE-UUID-HERE</string>
+    <key>PayloadVersion</key>
+    <integer>1</integer>
+</dict>
+</plist>
