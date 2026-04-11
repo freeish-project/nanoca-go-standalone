@@ -9,6 +9,9 @@ and Linux (TPM 2.0). Runs behind Cloudflare WARP/Tunnel.
 Separate from the [freeish](https://github.com/nfohs/freeish) repo. The nanoca-server
 Go source was forked from freeish's `nanoca/nanoca-server/` with an updated module path.
 
+Uses `github.com/nfohs/nanoca` fork (branch `feat/chain-and-remote-signer`) via `replace`
+directive in go.mod, pending upstream merge at `github.com/brandonweeks/nanoca`.
+
 ## Architecture
 
 - **nanoca-server**: Go binary wrapping the nanoca library. Serves ACME endpoints.
@@ -18,6 +21,8 @@ Go source was forked from freeish's `nanoca/nanoca-server/` with an updated modu
 - **Fleet authorizer**: Queries Fleet Premium `/api/v1/fleet/hosts` to authorize enrollment.
 - **TPM verifier**: Validates AIK cert chains against vendor root CAs. Fetches roots on startup, refreshes daily.
 - **Apple verifier**: Built into nanoca library. Validates Secure Enclave attestation.
+- **Certificate chain**: Optional intermediate/root chain served in ACME cert responses per RFC 8555 Section 7.4.2.
+- **Remote signing oracle**: Optional HTTP signing oracle (`signers/remote`) for HSM/KMS backends. CA key stays off-box.
 
 ## Key Files
 
@@ -68,6 +73,8 @@ cd nanoca-server && go test ./...
 - nanoca-server configured entirely via environment variables (with flag fallbacks)
 - K8s Secret mounted as files at `/etc/nanoca/` for CA cert/key (not env vars)
 - `NANOCA_CA_CERT` and `NANOCA_CA_KEY` env vars are **file paths**, not cert content
+- `NANOCA_CHAIN_FILE` is an optional PEM file path for intermediate/root chain certificates
+- Remote signer configured via `NANOCA_REMOTE_SIGNER_URL`, `NANOCA_REMOTE_SIGNER_TOKEN`, `NANOCA_REMOTE_SIGNER_PUBKEY` (replaces `NANOCA_CA_KEY`)
 
 ## Security
 

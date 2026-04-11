@@ -7,6 +7,7 @@ package main
 
 import (
 	"context"
+	"crypto"
 	"crypto/x509"
 	"encoding/pem"
 	"flag"
@@ -20,6 +21,7 @@ import (
 	nullauthorizer "github.com/brandonweeks/nanoca/authorizers/null"
 	"github.com/brandonweeks/nanoca/issuers/inprocess"
 	"github.com/brandonweeks/nanoca/signers/file"
+	"github.com/brandonweeks/nanoca/signers/remote"
 	"github.com/brandonweeks/nanoca/storage/badger"
 	"github.com/brandonweeks/nanoca/verifiers/apple"
 	"github.com/nfohs/nanoca-go-standalone/nanoca-server/fleetauth"
@@ -38,6 +40,10 @@ func main() {
 		flTPMRootsDir = flag.String("tpm-roots-dir", envOrDefault("NANOCA_TPM_ROOTS_DIR", "/var/lib/nanoca/tpm-roots"), "directory for cached TPM vendor root CAs")
 		flFleetURL   = flag.String("fleet-url", envOrDefault("NANOCA_FLEET_URL", ""), "Fleet server URL for device authorization (empty = null authorizer)")
 		flFleetToken = flag.String("fleet-token", envOrDefault("NANOCA_FLEET_TOKEN", ""), "Fleet API token for device authorization")
+		flChainFile       = flag.String("chain-file", envOrDefault("NANOCA_CHAIN_FILE", ""), "PEM file containing intermediate/root chain certificates (optional)")
+		flRemoteSignerURL   = flag.String("remote-signer-url", envOrDefault("NANOCA_REMOTE_SIGNER_URL", ""), "remote signing oracle URL (use instead of ca-key)")
+		flRemoteSignerToken = flag.String("remote-signer-token", envOrDefault("NANOCA_REMOTE_SIGNER_TOKEN", ""), "Bearer token for remote signing oracle")
+		flRemoteSignerPubKey = flag.String("remote-signer-pubkey", envOrDefault("NANOCA_REMOTE_SIGNER_PUBKEY", ""), "PEM file containing the public key for the remote signer")
 	)
 	flag.Parse()
 
@@ -60,11 +66,57 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Load CA signing key
-	signer, err := file.LoadSigner(*flCAKey)
-	if err != nil {
-		logger.Error("loading CA key", "error", err)
-		os.Exit(1)
+	// Load CA signing key: either from file or remote oracle
+	var signer crypto.Signer
+	if *flRemoteSignerURL != "" {
+		if *flRemoteSignerPubKey == "" {
+			logger.Error("remote-signer-pubkey is required when using remote-signer-url")
+			os.Exit(1)
+		}
+		pubPEM, err := os.ReadFile(*flRemoteSignerPubKey)
+		if err != nil {
+			logger.Error("reading remote signer public key", "error", err)
+			os.Exit(1)
+		}
+		signer, err = remote.New(*flRemoteSignerURL, *flRemoteSignerToken, string(pubPEM))
+		if err != nil {
+			logger.Error("creating remote signer", "error", err)
+			os.Exit(1)
+		}
+		logger.Info("using remote signing oracle", "url", *flRemoteSignerURL)
+	} else {
+		signer, err = file.LoadSigner(*flCAKey)
+		if err != nil {
+			logger.Error("loading CA key", "error", err)
+			os.Exit(1)
+		}
+	}
+
+	// Load optional certificate chain (intermediates/root)
+	var chain []*x509.Certificate
+	if *flChainFile != "" {
+		chainPEM, err := os.ReadFile(*flChainFile)
+		if err != nil {
+			logger.Error("reading chain file", "error", err)
+			os.Exit(1)
+		}
+		for rest := chainPEM; len(rest) > 0; {
+			var blk *pem.Block
+			blk, rest = pem.Decode(rest)
+			if blk == nil {
+				break
+			}
+			if blk.Type != "CERTIFICATE" {
+				continue
+			}
+			cert, err := x509.ParseCertificate(blk.Bytes)
+			if err != nil {
+				logger.Error("parsing chain certificate", "error", err)
+				os.Exit(1)
+			}
+			chain = append(chain, cert)
+		}
+		logger.Info("loaded certificate chain", "count", len(chain))
 	}
 
 	// Configure storage
@@ -84,8 +136,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Create issuer (signs certs in-process using the CA cert + key)
-	issuer := inprocess.New(caCert, signer)
+	// Create issuer (signs certs in-process using the CA cert + key + optional chain)
+	issuer := inprocess.New(caCert, signer, chain...)
 
 	// Authorizer: use Fleet if configured, otherwise null (allow all).
 	var authorizer nanoca.Authorizer
