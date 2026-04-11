@@ -66,6 +66,12 @@ spec:
                   key: NANOCA_FLEET_TOKEN
             # CA cert/key loaded from file paths (volume-mounted Secret)
             # Defaults match the mount path: /etc/nanoca/ca.pem, /etc/nanoca/ca.key
+            # Optional: remote signer token (uncomment if using remote signing oracle)
+            # - name: NANOCA_REMOTE_SIGNER_TOKEN
+            #   valueFrom:
+            #     secretKeyRef:
+            #       name: nanoca-secrets
+            #       key: NANOCA_REMOTE_SIGNER_TOKEN
           volumeMounts:
             - name: ca-certs
               mountPath: /etc/nanoca
@@ -134,6 +140,12 @@ spec:
               - key: ca.key
                 path: ca.key
                 mode: 0400
+              # Uncomment to mount chain file for full certificate chain serving
+              # - key: chain.pem
+              #   path: chain.pem
+              # Uncomment to mount remote signer public key
+              # - key: signer-pub.pem
+              #   path: signer-pub.pem
         # Pod-local cache for TPM vendor root CAs.
         # Survives container restarts but wiped on pod reschedule.
         # FetchRoots re-populates on startup; daily refresh keeps it current.

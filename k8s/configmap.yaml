@@ -10,3 +10,8 @@ data:
   NANOCA_DATA_DIR: ""          # empty = in-memory Badger (stateless replicas)
   NANOCA_ENABLE_TPM: "true"
   NANOCA_PREFIX: "/acme"
+  # Set to /etc/nanoca/chain.pem to serve full certificate chain (intermediate + root)
+  # NANOCA_CHAIN_FILE: "/etc/nanoca/chain.pem"
+  # Remote signing oracle (use instead of ca.key for HSM/KMS backends)
+  # NANOCA_REMOTE_SIGNER_URL: "https://signer.YOURDOMAIN.COM"
+  # NANOCA_REMOTE_SIGNER_PUBKEY: "/etc/nanoca/signer-pub.pem"
