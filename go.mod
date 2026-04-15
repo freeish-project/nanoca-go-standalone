@@ -1,4 +1,4 @@
-module github.com/nfohs/nanoca-go-standalone/nanoca-server
+module github.com/nfohs/nanoca-go-standalone
 
 go 1.26.0
 

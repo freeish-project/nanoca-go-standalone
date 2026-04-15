@@ -1,4 +1,4 @@
-package tpmverifier
+package tpm
 
 import (
 	"context"

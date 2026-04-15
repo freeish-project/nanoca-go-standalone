@@ -1,4 +1,4 @@
-package fleetauth
+package fleet
 
 import (
 	"context"

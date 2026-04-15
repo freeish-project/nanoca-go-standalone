@@ -24,8 +24,8 @@ import (
 	"github.com/brandonweeks/nanoca/signers/remote"
 	"github.com/brandonweeks/nanoca/storage/badger"
 	"github.com/brandonweeks/nanoca/verifiers/apple"
-	"github.com/nfohs/nanoca-go-standalone/nanoca-server/fleetauth"
-	"github.com/nfohs/nanoca-go-standalone/nanoca-server/tpmverifier"
+	"github.com/nfohs/nanoca-go-standalone/authorizers/fleet"
+	"github.com/nfohs/nanoca-go-standalone/verifiers/tpm"
 )
 
 func main() {
@@ -142,7 +142,7 @@ func main() {
 	// Authorizer: use Fleet if configured, otherwise null (allow all).
 	var authorizer nanoca.Authorizer
 	if *flFleetURL != "" && *flFleetToken != "" {
-		authorizer = fleetauth.New(logger, *flFleetURL, *flFleetToken)
+		authorizer = fleet.New(logger, *flFleetURL, *flFleetToken)
 		logger.Info("using Fleet authorizer", "fleet_url", *flFleetURL)
 	} else {
 		authorizer = nullauthorizer.New()
@@ -158,17 +158,17 @@ func main() {
 	if *flEnableTPM {
 		// Fetch TPM vendor root CAs on startup.
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-		if err := tpmverifier.FetchRoots(ctx, logger, *flTPMRootsDir); err != nil {
+		if err := tpm.FetchRoots(ctx, logger, *flTPMRootsDir); err != nil {
 			logger.Error("fetching TPM roots", "error", err)
 			os.Exit(1)
 		}
 		cancel()
 
 		// Start daily background refresh.
-		stopRefresh := tpmverifier.StartPeriodicRefresh(logger, *flTPMRootsDir, 24*time.Hour)
+		stopRefresh := tpm.StartPeriodicRefresh(logger, *flTPMRootsDir, 24*time.Hour)
 		defer stopRefresh()
 
-		caOpts = append(caOpts, nanoca.WithVerifier(tpmverifier.New(logger, *flTPMRootsDir)))
+		caOpts = append(caOpts, nanoca.WithVerifier(tpm.New(logger, *flTPMRootsDir)))
 		logger.Info("TPM 2.0 verifier enabled", "roots_dir", *flTPMRootsDir)
 	}
 
