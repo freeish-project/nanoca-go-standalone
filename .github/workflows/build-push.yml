@@ -4,9 +4,13 @@ on:
   push:
     branches: [main]
     paths:
-      - 'nanoca-server/**'
+      - 'cmd/**'
+      - 'authorizers/**'
+      - 'verifiers/**'
       - 'fleet-acme-enroll/**'
       - 'Dockerfile'
+      - 'go.mod'
+      - 'go.sum'
   workflow_dispatch:
 
 env:

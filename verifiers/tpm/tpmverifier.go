@@ -2,7 +2,7 @@
 // attestation. It validates AIK certificate chains against trusted TPM
 // manufacturer root CAs, verifies certify signatures, and checks the nonce
 // in TPMS_ATTEST.extraData against SHA256(challenge).
-package tpmverifier
+package tpm
 
 import (
 	"context"

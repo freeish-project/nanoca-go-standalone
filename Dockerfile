@@ -4,10 +4,13 @@
 
 FROM golang:1.22-alpine AS build
 RUN apk add --no-cache git
-WORKDIR /build/nanoca-server
-COPY nanoca-server/ .
+WORKDIR /build
+COPY go.mod go.sum ./
+COPY authorizers/ authorizers/
+COPY verifiers/ verifiers/
+COPY cmd/ cmd/
 RUN go mod download
-RUN CGO_ENABLED=0 GOOS=linux go build -o /nanoca-server .
+RUN CGO_ENABLED=0 GOOS=linux go build -o /nanoca-server ./cmd/nanoca-server
 WORKDIR /build/fleet-acme-enroll
 COPY fleet-acme-enroll/ .
 RUN go mod download

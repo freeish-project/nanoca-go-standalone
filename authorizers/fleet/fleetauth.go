@@ -1,6 +1,6 @@
 // Package fleetauth implements a nanoca Authorizer that checks whether a
 // device is enrolled in FleetDM before allowing certificate issuance.
-package fleetauth
+package fleet
 
 import (
 	"context"
