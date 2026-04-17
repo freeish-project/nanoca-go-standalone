@@ -18,7 +18,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/brandonweeks/nanoca"
+	"github.com/freeish-project/nanoca"
 )
 
 func testLogger() *slog.Logger {

@@ -9,7 +9,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/brandonweeks/nanoca"
+	"github.com/freeish-project/nanoca"
 )
 
 func testLogger() *slog.Logger {

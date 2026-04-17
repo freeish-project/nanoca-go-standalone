@@ -11,7 +11,7 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/brandonweeks/nanoca"
+	"github.com/freeish-project/nanoca"
 )
 
 // FleetAuthorizer checks Fleet's host inventory to authorize devices.

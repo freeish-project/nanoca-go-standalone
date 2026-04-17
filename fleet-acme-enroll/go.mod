@@ -1,4 +1,4 @@
-module github.com/nfohs/nanoca-go-standalone/fleet-acme-enroll
+module github.com/freeish-project/nanoca-go-standalone/fleet-acme-enroll
 
 go 1.22.0
 

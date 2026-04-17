@@ -1,10 +1,8 @@
-module github.com/nfohs/nanoca-go-standalone
+module github.com/freeish-project/nanoca-go-standalone
 
 go 1.26.0
 
-require github.com/brandonweeks/nanoca v0.0.0-20260405183624-cdb0581dbb85
-
-replace github.com/brandonweeks/nanoca => github.com/nfohs/nanoca v0.0.0-20260405183624-cdb0581dbb85
+require github.com/freeish-project/nanoca v0.0.0-20260417002818-1c7efeb45356
 
 require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
