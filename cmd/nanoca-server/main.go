@@ -17,15 +17,15 @@ import (
 	"os"
 	"time"
 
-	"github.com/brandonweeks/nanoca"
-	nullauthorizer "github.com/brandonweeks/nanoca/authorizers/null"
-	"github.com/brandonweeks/nanoca/issuers/inprocess"
-	"github.com/brandonweeks/nanoca/signers/file"
-	"github.com/brandonweeks/nanoca/signers/remote"
-	"github.com/brandonweeks/nanoca/storage/badger"
-	"github.com/brandonweeks/nanoca/verifiers/apple"
-	"github.com/nfohs/nanoca-go-standalone/authorizers/fleet"
-	"github.com/nfohs/nanoca-go-standalone/verifiers/tpm"
+	"github.com/freeish-project/nanoca"
+	nullauthorizer "github.com/freeish-project/nanoca/authorizers/null"
+	"github.com/freeish-project/nanoca/issuers/inprocess"
+	"github.com/freeish-project/nanoca/signers/file"
+	"github.com/freeish-project/nanoca/signers/remote"
+	"github.com/freeish-project/nanoca/storage/badger"
+	"github.com/freeish-project/nanoca/verifiers/apple"
+	"github.com/freeish-project/nanoca-go-standalone/authorizers/fleet"
+	"github.com/freeish-project/nanoca-go-standalone/verifiers/tpm"
 )
 
 func main() {

@@ -20,7 +20,7 @@ import (
 	"log/slog"
 	"math/big"
 
-	"github.com/brandonweeks/nanoca"
+	"github.com/freeish-project/nanoca"
 )
 
 const (
