@@ -2,7 +2,7 @@
 # CA cert/key are NOT baked in; they come from a K8s Secret volume mount.
 # Cloudflared is NOT included; it runs as a separate sidecar container.
 
-FROM golang:1.22-alpine AS build
+FROM golang:1.26-alpine AS build
 RUN apk add --no-cache git
 WORKDIR /build
 COPY go.mod go.sum ./
