@@ -32,10 +32,20 @@ The Fleet authorizer queries `/api/v1/fleet/hosts` to verify that requesting dev
 
 ## Prerequisites
 
-- Kubernetes cluster
-- [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) configured to route `ca.YOURDOMAIN.COM` to `localhost:8443`
+- Kubernetes cluster (1.25+ recommended; the manifests use stable APIs and do not require platform-specific extensions)
+- [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) configured to route `ca.YOURDOMAIN.COM` to `localhost:8443`, or see [Deploying without Cloudflare Tunnel](#deploying-without-cloudflare-tunnel)
 - Fleet instance with API token (host read permissions)
-- CA certificate and private key (generated offline)
+- CA certificate and private key (generated offline -- see step 1 below)
+
+### Cluster requirements
+
+- **metrics-server** must be running for the HPA to function. GKE has it enabled by default; EKS, AKS, and most vanilla clusters do not. Check with `kubectl top pod`.
+- **Pod Security Standards.** The pod runs non-root, drops all capabilities, and uses the `RuntimeDefault` seccomp profile, so it satisfies the `baseline` profile out of the box. For namespaces enforcing `restricted`, additionally set `readOnlyRootFilesystem: true` on both containers (the cloudflared sidecar will need a writable `/tmp` mount added if you do).
+- **Outbound egress.** The TPM verifier fetches vendor root CAs (Intel, AMD, NXP, etc.) on startup and refreshes them daily. A pod on a private cluster needs Cloud NAT or an egress proxy to reach those vendor URLs.
+- **Cluster sizing.** A two-replica deployment requests roughly 1.2 vCPU and 1.3 GiB total (500m / 512Mi for nanoca-server plus 100m / 128Mi for the cloudflared sidecar, times two replicas). Plan accordingly on small clusters.
+- **`secrets.yaml` is a template, not an apply target.** It contains base64 placeholders that would land in your cluster as literal `YOUR_*` strings. Use `kubectl create secret generic --from-file=...` (step 2 below) instead, or hand-edit the file before applying.
+- **OpenShift.** The default `restricted-v2` SCC assigns a random non-root UID per namespace and rejects pods that pin `runAsUser`. To deploy on OpenShift, remove the `runAsUser: 65534` line from `deployment.yaml` (the binary works at any non-root UID since it only reads its mount paths) or grant the namespace's ServiceAccount a custom SCC.
+- **Pin image tags for production.** The reference manifest uses `:latest` for both `nanoca-server` and `cloudflared`. Pin to a SHA or version tag in real deployments to avoid silent rollouts.
 
 ## Quick Start
 
@@ -98,6 +108,37 @@ Requires macOS 14+, Apple Silicon or T2, and ADE/DEP supervised enrollment.
 
 See [docs/linux-enrollment.md](docs/linux-enrollment.md) for building and deploying
 the `fleet-acme-enroll` binary.
+
+## Deploying without Cloudflare Tunnel
+
+The default deployment uses a `cloudflared` sidecar so nanoca-server can listen on plain HTTP at `:8443` while Cloudflare's edge handles TLS termination, DDoS protection, and WAF in front of it. This is the simplest path and matches the architecture diagram above.
+
+If you want to expose nanoca-server through a normal Kubernetes Ingress or Gateway instead -- for example, GKE Gateway, NGINX Ingress, or a cloud-managed Load Balancer -- two things to know:
+
+- **nanoca-server speaks plain HTTP on its listen port.** The container does not terminate TLS itself; the port is named `https` in `service.yaml` only because the Cloudflare-fronted setup serves the public ACME directory over HTTPS. Your Ingress or LB must provide TLS termination.
+- **Drop the cloudflared sidecar** from `deployment.yaml` and remove the `CLOUDFLARE_TUNNEL_TOKEN` line from `secrets.yaml`. The remaining nanoca-server container, ConfigMap, Service, HPA, and PDB are platform-agnostic.
+
+ACME clients connecting from outside the cluster must reach the public hostname over HTTPS regardless of which path you choose -- the Apple `device-attest-01` flow on macOS will refuse non-HTTPS endpoints.
+
+## Running with Docker
+
+For development, testing, or single-host deployments, the same image runs as a plain `docker run`. The binary is a static Go binary; no K8s primitives are required.
+
+```bash
+# Generate ca.pem and ca.key per "Generate CA keypair" above first.
+docker run -d --name nanoca \
+  -p 8443:8443 \
+  -v "$PWD/ca.pem:/etc/nanoca/ca.pem:ro" \
+  -v "$PWD/ca.key:/etc/nanoca/ca.key:ro" \
+  -e NANOCA_BASE_URL="https://ca.YOURDOMAIN.COM" \
+  -e NANOCA_FLEET_URL="https://fleet.YOURDOMAIN.COM" \
+  -e NANOCA_FLEET_TOKEN="$FLEET_TOKEN" \
+  ghcr.io/freeish-project/nanoca-server:latest
+```
+
+The container listens on plain HTTP at `:8443`. Front it with a TLS-terminating reverse proxy (nginx, Caddy, Traefik) before exposing publicly -- the Apple `device-attest-01` flow requires HTTPS endpoints. For local development without TLS, set `NANOCA_BASE_URL="http://localhost:8443"`.
+
+To run without Fleet authorization (dev/test only -- any device can request a cert), omit `NANOCA_FLEET_URL` and `NANOCA_FLEET_TOKEN`; the binary falls back to the null authorizer.
 
 ## Configuration Reference
 

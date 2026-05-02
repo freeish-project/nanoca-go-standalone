@@ -19,11 +19,30 @@ spec:
         runAsNonRoot: true
         runAsUser: 65534
         fsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+
+      # Best-effort spread across zones for real multi-AZ availability with
+      # the default replicas: 2. ScheduleAnyway rather than DoNotSchedule so
+      # single-zone clusters still place pods.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: nanoca-server
 
       containers:
         # nanoca ACME CA server
         - name: nanoca-server
-          image: ghcr.io/YOURORG/nanoca-server:latest
+          # CI publishes this image on every push to main of nanoca-go-standalone.
+          # Override with your own fork's GHCR path if you maintain a fork.
+          image: ghcr.io/freeish-project/nanoca-server:latest
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
           ports:
             - containerPort: 8443
               name: https
@@ -114,6 +133,10 @@ spec:
         - name: cloudflared
           image: cloudflare/cloudflared:latest
           args: ["tunnel", "--no-autoupdate", "run"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
           env:
             - name: TUNNEL_TOKEN
               valueFrom:
