@@ -1,0 +1,66 @@
+nanoca {{ .Chart.AppVersion }} installed as release {{ .Release.Name }} in namespace {{ .Release.Namespace }}.
+
+Resources created:
+  Deployment: {{ include "nanoca.fullname" . }} ({{ if .Values.autoscaling.enabled }}HPA {{ .Values.autoscaling.minReplicas }}-{{ .Values.autoscaling.maxReplicas }}{{ else }}replicas: {{ .Values.replicaCount }}{{ end }})
+  Service:    {{ include "nanoca.fullname" . }} ({{ .Values.service.type }} on port {{ .Values.service.port }})
+  ConfigMap:  {{ include "nanoca.configMapName" . }}
+{{- if .Values.secrets.create }}
+  Secret:     {{ include "nanoca.fullname" . }} (chart-managed -- DEV ONLY)
+{{- else }}
+  Secret:     {{ .Values.secrets.existingSecret }} (referenced, not chart-managed)
+{{- end }}
+{{- if .Values.podDisruptionBudget.enabled }}
+  PDB:        {{ include "nanoca.fullname" . }} (minAvailable: {{ .Values.podDisruptionBudget.minAvailable }})
+{{- end }}
+{{- if .Values.networkPolicy.enabled }}
+  NetworkPolicy: {{ include "nanoca.fullname" . }}
+{{- end }}
+
+Ingress path:
+{{- if .Values.cloudflared.enabled }}
+  Cloudflare Tunnel sidecar enabled. Configure your CF Tunnel hostname to
+  point at localhost:8443 in the Cloudflare dashboard. The Service is
+  ClusterIP-only -- no external IP exposed by the cluster itself.
+{{- else if .Values.ingress.enabled }}
+  Ingress enabled at:
+  {{- range .Values.ingress.hosts }}
+    https://{{ .host }}{{ (index .paths 0).path }}
+  {{- end }}
+  REMINDER: nanoca-server speaks plain HTTP. Your Ingress controller MUST
+  terminate TLS. Verify with:
+    kubectl describe ingress {{ include "nanoca.fullname" . }}
+{{- else }}
+  WARNING: cloudflared.enabled=false AND ingress.enabled=false. The Service
+  is reachable only from inside the cluster. Add an Ingress, a Gateway, or
+  a LoadBalancer Service annotation to expose it.
+{{- end }}
+
+Sanity check:
+  kubectl -n {{ .Release.Namespace }} rollout status deploy/{{ include "nanoca.fullname" . }}
+  kubectl -n {{ .Release.Namespace }} logs -l app.kubernetes.io/instance={{ .Release.Name }} -c nanoca-server --tail=20
+
+Verify the ACME directory once a hostname is reachable:
+  curl -sf {{ .Values.nanoca.baseUrl }}{{ .Values.nanoca.prefix }}/directory | jq .
+
+Security reminders:
+{{- if .Values.secrets.create }}
+  - secrets.create=true is rendering a chart-managed Secret. The values
+    you supplied are stored in Helm release metadata (visible via
+    `helm get values --all {{ .Release.Name }}` and `helm history`).
+    Switch to secrets.existingSecret + a SealedSecret/ExternalSecret/sops
+    workflow before going to production.
+{{- end }}
+{{- if not .Values.nanoca.remoteSigner.enabled }}
+  - The CA private key is mounted into pods as ca.key. Consider enabling
+    nanoca.remoteSigner so the CA private key never enters the cluster
+    (HSM/KMS-backed signing oracle pattern). See values.yaml for details.
+{{- end }}
+{{- if not .Values.networkPolicy.enabled }}
+  - networkPolicy.enabled=false. If your CNI supports NetworkPolicy
+    (Calico, Cilium, etc.), enable it to restrict egress to known
+    destinations (Fleet API, signing oracle, kube-dns, Apple/TPM root
+    fetch). Default policy in values.yaml is a reasonable starting point.
+{{- end }}
+  - Secret values should be supplied via `--values <file>` (kept out of
+    git), not `--set` (shell-history leak). When using existingSecret,
+    pre-create it via SealedSecrets, ExternalSecrets, or sops.

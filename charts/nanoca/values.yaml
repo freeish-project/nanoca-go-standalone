@@ -1,0 +1,314 @@
+# Default values for nanoca.
+#
+# SECURITY NOTES (read these before editing):
+#   1. Never put real secret values in this file. Use --values <override.yaml>
+#      kept out of git, or pre-create a Kubernetes Secret out-of-band and
+#      reference it via secrets.existingSecret.
+#   2. The CA private key is the highest-stakes secret in this system. Prefer
+#      `nanoca.remoteSigner` (HSM/KMS-backed signing oracle) over file-based
+#      ca.key whenever possible. With remoteSigner, ca.key never enters the
+#      cluster.
+#   3. `secrets.create=true` writes the Secret manifest from chart values.
+#      Helm release metadata then persists those values in cluster state
+#      (helm history, helm get values --all). This is fine for dev clusters
+#      and explicitly NOT fine for production. Production should pre-create
+#      the Secret and use `secrets.existingSecret`.
+
+# -- Image to deploy. CI publishes ghcr.io/freeish-project/nanoca-server:<tag>
+# on every push to main. Override with your fork's GHCR path if you maintain one.
+image:
+  repository: ghcr.io/freeish-project/nanoca-server
+  # If unset, defaults to Chart.AppVersion (the chart's pinned app version).
+  # Override to track a specific release or your own build.
+  tag: ""
+  # Optional sha256 digest pin. When set, takes precedence over `tag` for
+  # immutable image references (recommended for production).
+  # Example: digest: "sha256:abc123..."
+  digest: ""
+  pullPolicy: IfNotPresent
+  # imagePullSecrets to use for private registries. Each entry is a Secret
+  # name in the install namespace.
+  pullSecrets: []
+  # - name: my-registry-creds
+
+# -- Number of replicas when HPA is disabled. Ignored when autoscaling.enabled=true.
+# Default of 2 matches the raw k8s/ manifests' baseline availability target.
+replicaCount: 2
+
+# Override the chart name and the resource name prefix.
+nameOverride: ""
+fullnameOverride: ""
+
+# -- ServiceAccount for the nanoca pods. Defaults to a dedicated SA per release.
+# Token automounting is OFF: nanoca does not talk to the Kubernetes API, so a
+# mounted SA token is a needless credential.
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+  automountServiceAccountToken: false
+
+# -- Pod-level securityContext. Applies to all containers in the pod.
+# Defaults match Pod Security Standards "restricted" profile.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65534
+  runAsGroup: 65534
+  fsGroup: 65534
+  seccompProfile:
+    type: RuntimeDefault
+
+# -- Container-level securityContext for the nanoca-server container.
+# Defaults match PSS restricted profile and require a read-only root FS.
+# The chart provides emptyDir mounts for /tmp and /var/lib/nanoca/tpm-roots
+# so writes go to in-memory volumes rather than the container FS.
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+  # AppArmor profile applies on supported nodes (Linux with AppArmor LSM).
+  # Set to "" or remove if your nodes don't support AppArmor.
+  appArmorProfile:
+    type: RuntimeDefault
+
+# -- nanoca-server config. Mostly maps 1:1 to NANOCA_* environment variables;
+# see https://github.com/freeish-project/nanoca-go-standalone#configuration-reference
+nanoca:
+  # Public ACME directory URL. Must terminate TLS at a trusted edge (cloudflared,
+  # Ingress with cert-manager, etc.) -- nanoca-server itself listens on plain HTTP.
+  baseUrl: "https://ca.YOURDOMAIN.COM"
+  # ACME endpoint URL prefix. Default matches nanoca's documented `/acme/...`.
+  prefix: "/acme"
+  # Listen address inside the container. Service forwards to this port.
+  listen: ":8443"
+  # Badger storage directory. Empty string = in-memory (stateless replicas
+  # safe to scale horizontally; orders survive only within a single pod's
+  # lifetime, which is fine for short-lived ACME flows).
+  dataDir: ""
+  # Enable TPM 2.0 attestation verifier (for Linux device-attest-01).
+  enableTPM: true
+  # Fleet authorization (for device-by-serial enrollment).
+  # Leave fleetUrl empty to disable Fleet authorization (null authorizer = open).
+  fleetUrl: ""
+
+  # Optional: serve full certificate chain (intermediate + root PEM bundle)
+  # via the ACME certificate endpoint. Mounted from the secret as chain.pem.
+  chainFile:
+    enabled: false
+    # Mount path inside the container; secret must contain a chain.pem entry.
+    mountPath: "/etc/nanoca/chain.pem"
+
+  # Optional: remote signing oracle. With this enabled, nanoca delegates ALL
+  # signing to a remote HTTP endpoint (typically backed by an HSM or KMS) and
+  # never touches the CA private key. Strongly recommended for production --
+  # eliminates the cluster as a CA-key blast radius.
+  remoteSigner:
+    enabled: false
+    url: ""
+    # Path to public key PEM (PKIX format, ECDSA P-256 or P-384). Mounted from
+    # the secret as signer-pub.pem. The token comes from the secret as
+    # NANOCA_REMOTE_SIGNER_TOKEN.
+    pubKeyMountPath: "/etc/nanoca/signer-pub.pem"
+
+# -- Secret handling. Two modes: reference an existing Secret (production) or
+# create one from chart values (dev only).
+secrets:
+  # When true, the chart renders a Secret manifest from the values below.
+  # Default false to force opt-in: production deployments should pre-create
+  # the Secret out-of-band (via SealedSecrets, ExternalSecrets, sops, or
+  # `kubectl create secret generic ...`) and reference it via existingSecret.
+  create: false
+
+  # Pre-existing Secret to reference. Required when create=false.
+  # Expected keys (subset depending on enabled features):
+  #   ca.pem                       (always required)
+  #   ca.key                       (required unless nanoca.remoteSigner.enabled)
+  #   NANOCA_FLEET_TOKEN           (required when nanoca.fleetUrl is set)
+  #   chain.pem                    (required when nanoca.chainFile.enabled)
+  #   signer-pub.pem               (required when nanoca.remoteSigner.enabled)
+  #   NANOCA_REMOTE_SIGNER_TOKEN   (required when nanoca.remoteSigner.enabled)
+  #   CLOUDFLARE_TUNNEL_TOKEN      (required when cloudflared.enabled and
+  #                                  cloudflared.existingTokenSecret is empty)
+  existingSecret: ""
+
+  # Values used only when secrets.create=true. NEVER COMMIT REAL VALUES HERE.
+  # Provide them via `helm install --values overrides.yaml` (file kept out
+  # of source control), not via `--set` (shell history leak).
+  caCert: ""               # PEM, plaintext (helm base64-encodes for the Secret)
+  caKey: ""                # PEM, plaintext; ignored when nanoca.remoteSigner.enabled
+  fleetToken: ""           # plaintext bearer token
+  chain: ""                # PEM bundle; only used when nanoca.chainFile.enabled
+  signerPubKey: ""         # PEM; only used when nanoca.remoteSigner.enabled
+  signerToken: ""          # plaintext; only used when nanoca.remoteSigner.enabled
+  cloudflareTunnelToken: "" # plaintext; only used when cloudflared.enabled
+
+# -- Service. ClusterIP by default (the cloudflared sidecar terminates the
+# external connection at the pod). LoadBalancer/NodePort are intentionally
+# discouraged: exposing the ACME endpoint directly bypasses the CF Tunnel
+# auth boundary and increases the attack surface.
+service:
+  type: ClusterIP
+  port: 8443
+  annotations: {}
+
+# -- Cloudflare Tunnel sidecar. Recommended for the freeish reference
+# architecture (Tunnel terminates at Cloudflare, no public IP on the cluster).
+# Disable for GKE Gateway, NGINX Ingress, or direct-LoadBalancer deployments,
+# in which case set ingress.enabled=true.
+cloudflared:
+  enabled: true
+  image:
+    repository: cloudflare/cloudflared
+    tag: latest    # cloudflared has no semver release stream; track latest
+    pullPolicy: IfNotPresent
+  args: ["tunnel", "--no-autoupdate", "run"]
+  # Source for the tunnel token. If empty, falls back to the chart's secret
+  # (key CLOUDFLARE_TUNNEL_TOKEN). Override to point at a separately-managed
+  # Secret (e.g., one provisioned by ExternalSecrets / SealedSecrets).
+  existingTokenSecret: ""
+  existingTokenSecretKey: "CLOUDFLARE_TUNNEL_TOKEN"
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+    limits:
+      cpu: "200m"
+      memory: "256Mi"
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: ["ALL"]
+
+# -- Ingress (alternative to Cloudflare Tunnel). Disabled by default.
+# Enable with `cloudflared.enabled=false` for GKE Gateway / NGINX / etc.
+# TLS termination is REQUIRED at this layer because nanoca-server itself
+# listens on plain HTTP -- never expose nanoca's HTTP port directly.
+ingress:
+  enabled: false
+  className: ""    # e.g., "nginx", "gke-l7-rilb"
+  annotations: {}
+  # cert-manager.io/cluster-issuer: "letsencrypt-prod"
+  hosts:
+    - host: ca.YOURDOMAIN.COM
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: nanoca-tls
+      hosts:
+        - ca.YOURDOMAIN.COM
+
+# -- HorizontalPodAutoscaler. Defaults match the raw k8s/ manifests.
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 20
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 70
+
+# -- PodDisruptionBudget. Keeps at least one replica available during voluntary
+# disruptions (node drains). Defaults match the raw k8s/ manifests.
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+  # maxUnavailable: 1   # use one OR the other, not both
+
+# -- topologySpreadConstraints. Best-effort spread across availability zones.
+# ScheduleAnyway (rather than DoNotSchedule) so single-zone clusters still
+# place pods.
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: topology.kubernetes.io/zone
+    whenUnsatisfiable: ScheduleAnyway
+    labelSelector:
+      matchLabels: {}    # populated by template helper
+
+# -- Resource requests/limits for the nanoca-server container.
+resources:
+  requests:
+    cpu: "500m"
+    memory: "512Mi"
+  limits:
+    cpu: "1000m"
+    memory: "1Gi"
+
+# -- Probes. /health is exposed by nanoca-server.
+probes:
+  startup:
+    httpGet:
+      path: /health
+      port: https
+    failureThreshold: 30
+    periodSeconds: 5
+  liveness:
+    httpGet:
+      path: /health
+      port: https
+    initialDelaySeconds: 10
+    periodSeconds: 30
+    timeoutSeconds: 5
+  readiness:
+    httpGet:
+      path: /health
+      port: https
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 3
+
+# -- Standard pod scheduling overrides.
+nodeSelector: {}
+tolerations: []
+affinity: {}
+podAnnotations: {}
+podLabels: {}
+
+# -- Optional NetworkPolicy. OFF by default because policy enforcement is
+# CNI-dependent (Calico, Cilium, etc.) and the egress allowlist below is
+# environment-specific.
+#
+# When enabled, default-denies all traffic and explicitly allows:
+#   ingress: same-pod cloudflared sidecar (or your Ingress controller's namespace)
+#   egress:  kube-dns, plus the configurable allowlist below
+networkPolicy:
+  enabled: false
+  # Where to allow ingress from. Pod-to-pod (same pod's cloudflared sidecar
+  # is allowed via the always-on rule). Add Ingress controller namespaces or
+  # other clients here.
+  ingressFrom: []
+  # - namespaceSelector:
+  #     matchLabels:
+  #       kubernetes.io/metadata.name: ingress-nginx
+  #   podSelector:
+  #     matchLabels:
+  #       app.kubernetes.io/name: ingress-nginx
+  #
+  # Egress allowlist. Defaults cover the bare minimum: kube-dns + the open
+  # internet (Fleet API, signing oracle, Apple/TPM root fetch). Tighten in
+  # production by replacing the 0.0.0.0/0 entry with specific CIDRs.
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              # Block egress to common cluster CIDR ranges (RFC 1918) by default.
+              # Add specific cluster service ranges to the except list as needed.
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+      ports:
+        - protocol: TCP
+          port: 443

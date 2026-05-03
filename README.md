@@ -11,9 +11,46 @@ Issues hardware-backed device identity certificates via ACME `device-attest-01`:
 This binary is consumed two ways:
 
 - **Cloudflare Containers (Freeish stack).** The [freeish](https://github.com/freeish-project/freeish) project clones this repo at a tagged version inside its own Dockerfile and runs the resulting image as a Cloudflare Container managed by a gateway Worker. The CA private key lives in a separate signing-oracle Worker (CF Secrets Store), and the binary uses `signers/remote` to delegate signing. See [HANDOFF_SECRETS_ADDENDUM.md](https://github.com/freeish-project/freeish/blob/main/HANDOFF_SECRETS_ADDENDUM.md) Part 2 for the full architecture; nothing in this repo needs to change to support that path.
-- **Kubernetes (self-hosted).** Manifests in `k8s/`, with a `cloudflared` sidecar for Cloudflare Tunnel connectivity. The rest of this README covers the K8s path.
+- **Kubernetes (self-hosted).** Two flavours:
+  - Helm chart at `charts/nanoca/` -- recommended for most installs. Parameterized values, `secrets.existingSecret` integration with SealedSecrets / ExternalSecrets / sops, optional NetworkPolicy, optional Ingress (when not using the Cloudflare Tunnel sidecar). See [Install with Helm](#install-with-helm).
+  - Raw manifests at `k8s/`, the source of truth that the chart parameterizes. The rest of this README's Quick Start covers the raw-manifest path; reach for it if you want to read every line before applying or if you're not running Helm.
 
 The CI workflow at `.github/workflows/build-push.yml` builds and pushes a multi-arch image to `ghcr.io/freeish-project/nanoca-server` on every push to `main`. Both deployment paths can pull from there, or build from source.
+
+## Install with Helm
+
+```bash
+# 1. Generate the CA keypair offline (see Quick Start step 1 below).
+
+# 2. Pre-create the Secret out-of-band (production pattern):
+kubectl create namespace security-infra
+kubectl -n security-infra create secret generic nanoca-secrets \
+  --from-file=ca.pem=ca.pem \
+  --from-file=ca.key=ca.key \
+  --from-literal=NANOCA_FLEET_TOKEN='<your-fleet-token>' \
+  --from-literal=CLOUDFLARE_TUNNEL_TOKEN='<your-tunnel-token>'
+
+# 3. Install the chart, referencing the existing Secret:
+helm install nanoca ./charts/nanoca \
+  --namespace security-infra \
+  --set secrets.existingSecret=nanoca-secrets \
+  --set nanoca.baseUrl=https://ca.YOURDOMAIN.COM \
+  --set nanoca.fleetUrl=https://fleet.YOURDOMAIN.COM
+```
+
+Key value-toggles (see `charts/nanoca/values.yaml` for the full list and security commentary):
+
+| Knob | Default | Purpose |
+|---|---|---|
+| `secrets.existingSecret` | `""` | Reference a pre-created Secret (production pattern). Required unless `secrets.create=true`. |
+| `secrets.create` | `false` | Render a chart-managed Secret from values (dev only -- values land in Helm release metadata). |
+| `nanoca.remoteSigner.enabled` | `false` | Delegate signing to an HSM/KMS-backed oracle so the CA private key never enters the cluster. |
+| `cloudflared.enabled` | `true` | Toggle the Cloudflare Tunnel sidecar. Disable for GKE Gateway / NGINX Ingress / direct-LB paths. |
+| `ingress.enabled` | `false` | Render an Ingress when not using the cloudflared sidecar. TLS termination required. |
+| `networkPolicy.enabled` | `false` | Default-deny NetworkPolicy with an explicit egress allowlist. |
+| `autoscaling.enabled` | `true` | HPA between `minReplicas` and `maxReplicas` on CPU + memory. |
+
+For the security tradeoffs around each toggle (chart-managed Secret vs existingSecret, file-signer vs remote signer, NetworkPolicy egress shape), read the comments in `values.yaml` before deploying.
 
 ## Architecture (Kubernetes)
 

@@ -1,0 +1,25 @@
+apiVersion: v2
+name: nanoca
+description: ACME CA with device-attest-01 (macOS Managed Device Attestation, TPM 2.0). Issues short-lived device identity certificates for mTLS.
+type: application
+version: 0.1.0
+appVersion: v0.1.1
+kubeVersion: ">=1.27.0-0"
+home: https://github.com/freeish-project/nanoca-go-standalone
+sources:
+  - https://github.com/freeish-project/nanoca-go-standalone
+  - https://github.com/freeish-project/nanoca
+keywords:
+  - acme
+  - pki
+  - ca
+  - device-attestation
+  - mtls
+  - tpm
+  - secure-enclave
+maintainers:
+  - name: freeish-project
+    url: https://github.com/freeish-project
+annotations:
+  artifacthub.io/license: Apache-2.0
+  artifacthub.io/category: security

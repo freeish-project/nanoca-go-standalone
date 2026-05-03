@@ -1,0 +1,149 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "nanoca.fullname" . }}
+  labels:
+    {{- include "nanoca.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "nanoca.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "nanoca.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        # Roll the pods when the ConfigMap or chart-managed Secret changes,
+        # so config edits actually take effect without a manual restart.
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- if .Values.secrets.create }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        {{- end }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "nanoca.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automountServiceAccountToken }}
+      {{- with .Values.image.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- range . }}
+        - maxSkew: {{ .maxSkew }}
+          topologyKey: {{ .topologyKey }}
+          whenUnsatisfiable: {{ .whenUnsatisfiable }}
+          labelSelector:
+            matchLabels:
+              {{- include "nanoca.selectorLabels" $ | nindent 14 }}
+        {{- end }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: nanoca-server
+          image: {{ include "nanoca.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          ports:
+            - name: https
+              containerPort: 8443
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ include "nanoca.configMapName" . }}
+          env:
+            {{- if .Values.nanoca.fleetUrl }}
+            - name: NANOCA_FLEET_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "nanoca.secretName" . }}
+                  key: NANOCA_FLEET_TOKEN
+            {{- end }}
+            {{- if .Values.nanoca.remoteSigner.enabled }}
+            - name: NANOCA_REMOTE_SIGNER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "nanoca.secretName" . }}
+                  key: NANOCA_REMOTE_SIGNER_TOKEN
+            {{- end }}
+          volumeMounts:
+            - name: ca-certs
+              mountPath: /etc/nanoca
+              readOnly: true
+            - name: tpm-cache
+              mountPath: /var/lib/nanoca/tpm-roots
+            - name: tmp
+              mountPath: /tmp
+          startupProbe:
+            {{- toYaml .Values.probes.startup | nindent 12 }}
+          livenessProbe:
+            {{- toYaml .Values.probes.liveness | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.probes.readiness | nindent 12 }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+        {{- if .Values.cloudflared.enabled }}
+        - name: cloudflared
+          image: "{{ .Values.cloudflared.image.repository }}:{{ .Values.cloudflared.image.tag }}"
+          imagePullPolicy: {{ .Values.cloudflared.image.pullPolicy }}
+          args: {{ toJson .Values.cloudflared.args }}
+          securityContext:
+            {{- toYaml .Values.cloudflared.securityContext | nindent 12 }}
+          env:
+            - name: TUNNEL_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "nanoca.tunnelSecretName" . }}
+                  key: {{ .Values.cloudflared.existingTokenSecretKey }}
+          resources:
+            {{- toYaml .Values.cloudflared.resources | nindent 12 }}
+        {{- end }}
+      volumes:
+        # CA cert (and key, when not using remote signer) plus optional chain
+        # and signer pubkey. K8s puts Secret volumes on tmpfs (medium: Memory)
+        # by default -- the CA private key never lands on the node disk.
+        - name: ca-certs
+          secret:
+            secretName: {{ include "nanoca.secretName" . }}
+            items:
+              - key: ca.pem
+                path: ca.pem
+              {{- if not .Values.nanoca.remoteSigner.enabled }}
+              - key: ca.key
+                path: ca.key
+                mode: 0400
+              {{- end }}
+              {{- if .Values.nanoca.chainFile.enabled }}
+              - key: chain.pem
+                path: chain.pem
+              {{- end }}
+              {{- if .Values.nanoca.remoteSigner.enabled }}
+              - key: signer-pub.pem
+                path: signer-pub.pem
+              {{- end }}
+        - name: tpm-cache
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
