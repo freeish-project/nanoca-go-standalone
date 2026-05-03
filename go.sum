@@ -10,10 +10,8 @@ github.com/dgryski/go-farm v0.0.0-20240924180020-3414d57e47da h1:aIftn67I1fkbMa5
 github.com/dgryski/go-farm v0.0.0-20240924180020-3414d57e47da/go.mod h1:SqUrOPUnsFjfmXRMNPybcSiG0BgUW2AuFH8PAnS2iTw=
 github.com/dustin/go-humanize v1.0.1 h1:GzkhY7T5VNhEkwH0PVJgjz+fX1rhBrR7pRT3mDkpeCY=
 github.com/dustin/go-humanize v1.0.1/go.mod h1:Mu1zIs6XwVuF/gI1OepvI0qD18qycQx+mFykh5fBlto=
-github.com/freeish-project/nanoca v0.0.0-20260417072818-1c7efeb45356 h1:otjjbMguCOoEkvpePTEufr6w0cCvYjPOpQtIlz2jZy0=
-github.com/freeish-project/nanoca v0.0.0-20260417072818-1c7efeb45356/go.mod h1:SpY4NM8Zhh2+19FmmN2pMr7GjRobwaP9u11hncCwRTc=
-github.com/freeish-project/nanoca v0.1.0 h1:oaQ5q6kvBjTEa+OYVB4bQiqIvCY8HXs7k+L5Kf8Wfls=
-github.com/freeish-project/nanoca v0.1.0/go.mod h1:SpY4NM8Zhh2+19FmmN2pMr7GjRobwaP9u11hncCwRTc=
+github.com/freeish-project/nanoca v0.1.1 h1:Y9MBCgMkNzERkwV4pCVuUBdIEGAnKcyZHtm2dkk3J/Y=
+github.com/freeish-project/nanoca v0.1.1/go.mod h1:SpY4NM8Zhh2+19FmmN2pMr7GjRobwaP9u11hncCwRTc=
 github.com/fxamacker/cbor/v2 v2.9.1 h1:2rWm8B193Ll4VdjsJY28jxs70IdDsHRWgQYAI80+rMQ=
 github.com/fxamacker/cbor/v2 v2.9.1/go.mod h1:vM4b+DJCtHn+zz7h3FFp/hDAI9WNWCsZj23V5ytsSxQ=
 github.com/go-jose/go-jose/v4 v4.1.4 h1:moDMcTHmvE6Groj34emNPLs/qtYXRVcd6S7NHbHz3kA=

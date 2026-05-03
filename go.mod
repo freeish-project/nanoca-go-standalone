@@ -2,7 +2,7 @@ module github.com/freeish-project/nanoca-go-standalone
 
 go 1.26.0
 
-require github.com/freeish-project/nanoca v0.1.0
+require github.com/freeish-project/nanoca v0.1.1
 
 require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
