@@ -116,9 +116,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Install to nssdb for WARP mTLS.
+	// Install to nssdb for WARP mTLS. Fail loudly: the cert is useless to
+	// WARP if it isn't in NSS, and Fleet's setup-experience needs a non-zero
+	// exit to surface the failure.
 	if err := installToNSSDB(*flNSSDB, identifier, certPath, keyPath); err != nil {
-		logger.Warn("nssdb installation failed (may need nss-tools installed)", "error", err)
+		logger.Error("nssdb installation failed (nss-tools may be missing)", "error", err)
+		os.Exit(1)
 	}
 
 	logger.Info("enrollment complete", "cert", certPath, "identifier", identifier)

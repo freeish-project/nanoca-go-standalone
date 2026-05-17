@@ -67,7 +67,8 @@ spec:
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
           ports:
-            - name: https
+            # Plain HTTP -- TLS terminates at cloudflared (or Ingress).
+            - name: http
               containerPort: 8443
               protocol: TCP
           envFrom:

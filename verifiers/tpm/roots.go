@@ -124,7 +124,8 @@ func fetchAndWrite(ctx context.Context, client *http.Client, root vendorRoot, di
 }
 
 // LoadRootsFromDir reads all PEM files in dir and returns a cert pool and
-// a count of loaded certificates. Returns an empty pool (not nil) if dir
+// a count of loaded certificates (counting each cert, not each file --
+// bundle files contain multiple). Returns an empty pool (not nil) if dir
 // doesn't exist or contains no valid certs.
 func LoadRootsFromDir(dir string) (*x509.CertPool, int, error) {
 	pool := x509.NewCertPool()
@@ -146,7 +147,20 @@ func LoadRootsFromDir(dir string) (*x509.CertPool, int, error) {
 		if err != nil {
 			continue
 		}
-		if pool.AppendCertsFromPEM(data) {
+		for rest := data; len(rest) > 0; {
+			var block *pem.Block
+			block, rest = pem.Decode(rest)
+			if block == nil {
+				break
+			}
+			if block.Type != "CERTIFICATE" {
+				continue
+			}
+			cert, err := x509.ParseCertificate(block.Bytes)
+			if err != nil {
+				continue
+			}
+			pool.AddCert(cert)
 			count++
 		}
 	}

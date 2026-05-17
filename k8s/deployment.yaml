@@ -44,8 +44,9 @@ spec:
             capabilities:
               drop: [ALL]
           ports:
+            # Plain HTTP -- TLS terminates at cloudflared sidecar.
             - containerPort: 8443
-              name: https
+              name: http
               protocol: TCP
           env:
             - name: NANOCA_LISTEN

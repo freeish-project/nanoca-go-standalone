@@ -113,10 +113,12 @@ func (c *acmeClient) enroll(identifier string, csrKey *ecdsa.PrivateKey, att att
 	}
 
 	// Poll until challenge is validated.
-	if err := c.pollStatus(ch.URL, func(body []byte) string {
+	if err := c.pollStatus(ch.URL, func(body []byte) (string, error) {
 		var v acmeChallenge
-		json.Unmarshal(body, &v)
-		return v.Status
+		if err := json.Unmarshal(body, &v); err != nil {
+			return "", fmt.Errorf("decoding challenge poll: %w", err)
+		}
+		return v.Status, nil
 	}); err != nil {
 		return nil, fmt.Errorf("challenge validation: %w", err)
 	}
@@ -133,11 +135,13 @@ func (c *acmeClient) enroll(identifier string, csrKey *ecdsa.PrivateKey, att att
 
 	// Poll order until certificate is ready.
 	var certURL string
-	if err := c.pollStatus(order.URL, func(body []byte) string {
+	if err := c.pollStatus(order.URL, func(body []byte) (string, error) {
 		var o acmeOrder
-		json.Unmarshal(body, &o)
+		if err := json.Unmarshal(body, &o); err != nil {
+			return "", fmt.Errorf("decoding order poll: %w", err)
+		}
 		certURL = o.Certificate
-		return o.Status
+		return o.Status, nil
 	}); err != nil {
 		return nil, fmt.Errorf("order completion: %w", err)
 	}
@@ -282,16 +286,22 @@ func (c *acmeClient) downloadCert(url string) ([]byte, error) {
 // pollStatus polls a URL via POST-as-GET until the status is "valid" or
 // "invalid", using the provided function to extract the status from the
 // response body.
-func (c *acmeClient) pollStatus(url string, extractStatus func([]byte) string) error {
+func (c *acmeClient) pollStatus(url string, extractStatus func([]byte) (string, error)) error {
 	for i := 0; i < 30; i++ {
 		resp, err := c.signedPost(url, nil, false)
 		if err != nil {
 			return err
 		}
-		body, _ := io.ReadAll(resp.Body)
+		body, err := io.ReadAll(resp.Body)
 		resp.Body.Close()
+		if err != nil {
+			return fmt.Errorf("reading poll response: %w", err)
+		}
 
-		status := extractStatus(body)
+		status, err := extractStatus(body)
+		if err != nil {
+			return err
+		}
 		switch status {
 		case "valid":
 			return nil

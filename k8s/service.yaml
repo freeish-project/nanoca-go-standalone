@@ -12,5 +12,6 @@ spec:
     - port: 8443
       targetPort: 8443
       protocol: TCP
-      name: https
+      # Plain HTTP -- TLS terminates at cloudflared (or Ingress).
+      name: http
   type: ClusterIP
