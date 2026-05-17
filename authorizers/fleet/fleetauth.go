@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/freeish-project/nanoca"
@@ -36,18 +37,19 @@ func New(logger *slog.Logger, fleetURL, apiToken string) *FleetAuthorizer {
 	}
 }
 
-// hostsResponse is the minimal Fleet API response for /api/v1/fleet/hosts.
-type hostsResponse struct {
-	Hosts []host `json:"hosts"`
-}
-
-type host struct {
-	HardwareSerial string `json:"hardware_serial"`
-	UUID           string `json:"uuid"`
+// hostResponse is the Fleet response for GET /api/v1/fleet/hosts/identifier/:id.
+// Fleet wraps the single matched host in a `host` field; we only need to know
+// that the lookup succeeded plus the serial for logging.
+type hostResponse struct {
+	Host struct {
+		HardwareSerial string `json:"hardware_serial"`
+		UUID           string `json:"uuid"`
+	} `json:"host"`
 }
 
 // Authorize checks whether the device's permanent identifier matches an
-// enrolled host in Fleet. Returns true if a matching host is found.
+// enrolled host in Fleet. Returns true if Fleet returns a host for the
+// identifier.
 func (f *FleetAuthorizer) Authorize(ctx context.Context, device *nanoca.DeviceInfo) (bool, error) {
 	if device == nil || device.PermanentIdentifier == nil || device.PermanentIdentifier.Identifier == "" {
 		f.logger.WarnContext(ctx, "device has no permanent identifier, denying")
@@ -57,49 +59,47 @@ func (f *FleetAuthorizer) Authorize(ctx context.Context, device *nanoca.DeviceIn
 	identifier := device.PermanentIdentifier.Identifier
 	f.logger.InfoContext(ctx, "checking Fleet enrollment", "identifier", identifier)
 
-	hosts, err := f.queryHosts(ctx, identifier)
+	found, serial, err := f.lookupHost(ctx, identifier)
 	if err != nil {
-		return false, fmt.Errorf("querying Fleet hosts: %w", err)
+		return false, fmt.Errorf("querying Fleet host: %w", err)
+	}
+	if !found {
+		f.logger.WarnContext(ctx, "device not found in Fleet", "identifier", identifier)
+		return false, nil
 	}
 
-	for _, h := range hosts {
-		if h.HardwareSerial == identifier || h.UUID == identifier {
-			f.logger.InfoContext(ctx, "device authorized", "identifier", identifier, "matched_serial", h.HardwareSerial)
-			return true, nil
-		}
-	}
-
-	f.logger.WarnContext(ctx, "device not found in Fleet", "identifier", identifier)
-	return false, nil
+	f.logger.InfoContext(ctx, "device authorized", "identifier", identifier, "matched_serial", serial)
+	return true, nil
 }
 
-func (f *FleetAuthorizer) queryHosts(ctx context.Context, query string) ([]host, error) {
-	u, err := url.Parse(f.fleetURL + "/api/v1/fleet/hosts")
-	if err != nil {
-		return nil, fmt.Errorf("parsing Fleet URL: %w", err)
-	}
-	u.RawQuery = url.Values{"query": {query}}.Encode()
+// lookupHost calls Fleet's /api/v1/fleet/hosts/identifier/:identifier endpoint
+// which matches on hostname, osquery_host_identifier, node_key, UUID, or
+// hardware_serial -- single exact match, no fuzzy pagination semantics.
+func (f *FleetAuthorizer) lookupHost(ctx context.Context, identifier string) (bool, string, error) {
+	endpoint := strings.TrimRight(f.fleetURL, "/") + "/api/v1/fleet/hosts/identifier/" + url.PathEscape(identifier)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return nil, err
+		return false, "", err
 	}
 	req.Header.Set("Authorization", "Bearer "+f.apiToken)
 
 	resp, err := f.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("Fleet API request failed: %w", err)
+		return false, "", fmt.Errorf("Fleet API request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("Fleet API returned %d", resp.StatusCode)
+	switch resp.StatusCode {
+	case http.StatusOK:
+		var result hostResponse
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			return false, "", fmt.Errorf("decoding Fleet response: %w", err)
+		}
+		return true, result.Host.HardwareSerial, nil
+	case http.StatusNotFound:
+		return false, "", nil
+	default:
+		return false, "", fmt.Errorf("Fleet API returned %d", resp.StatusCode)
 	}
-
-	var result hostsResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("decoding Fleet response: %w", err)
-	}
-
-	return result.Hosts, nil
 }

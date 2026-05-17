@@ -18,18 +18,15 @@ func testLogger() *slog.Logger {
 
 func TestAuthorize_HostFound(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/fleet/hosts" {
+		if r.URL.Path != "/api/v1/fleet/hosts/identifier/SERIAL123" {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
 		if r.Header.Get("Authorization") != "Bearer test-token" {
 			t.Errorf("unexpected auth header: %s", r.Header.Get("Authorization"))
 		}
-		query := r.URL.Query().Get("query")
-		resp := hostsResponse{
-			Hosts: []host{
-				{HardwareSerial: query, UUID: "uuid-123"},
-			},
-		}
+		resp := hostResponse{}
+		resp.Host.HardwareSerial = "SERIAL123"
+		resp.Host.UUID = "uuid-123"
 		json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
@@ -52,8 +49,7 @@ func TestAuthorize_HostFound(t *testing.T) {
 
 func TestAuthorize_HostNotFound(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		resp := hostsResponse{Hosts: []host{}}
-		json.NewEncoder(w).Encode(resp)
+		w.WriteHeader(http.StatusNotFound)
 	}))
 	defer server.Close()
 
@@ -74,12 +70,15 @@ func TestAuthorize_HostNotFound(t *testing.T) {
 }
 
 func TestAuthorize_MatchByUUID(t *testing.T) {
+	// Fleet's identifier endpoint also matches UUIDs; server just returns 200
+	// with the host regardless of which identifier was supplied.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		resp := hostsResponse{
-			Hosts: []host{
-				{HardwareSerial: "DIFFERENT", UUID: "uuid-456"},
-			},
+		if r.URL.Path != "/api/v1/fleet/hosts/identifier/uuid-456" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
+		resp := hostResponse{}
+		resp.Host.HardwareSerial = "DIFFERENT"
+		resp.Host.UUID = "uuid-456"
 		json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
@@ -97,6 +96,34 @@ func TestAuthorize_MatchByUUID(t *testing.T) {
 	}
 	if !ok {
 		t.Fatal("expected authorized via UUID match, got denied")
+	}
+}
+
+func TestAuthorize_IdentifierEscaped(t *testing.T) {
+	// Identifiers can contain characters that need URL escaping in the path.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/fleet/hosts/identifier/serial with/slash" {
+			t.Errorf("path not properly escaped on the wire: %s", r.URL.Path)
+		}
+		resp := hostResponse{}
+		resp.Host.HardwareSerial = "serial with/slash"
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	auth := New(testLogger(), server.URL, "test-token")
+	device := &nanoca.DeviceInfo{
+		PermanentIdentifier: &nanoca.PermanentIdentifier{
+			Identifier: "serial with/slash",
+		},
+	}
+
+	ok, err := auth.Authorize(context.Background(), device)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected authorized, got denied")
 	}
 }
 

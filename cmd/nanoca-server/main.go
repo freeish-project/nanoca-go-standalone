@@ -10,11 +10,14 @@ import (
 	"crypto"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/freeish-project/nanoca"
@@ -196,10 +199,42 @@ func main() {
 		fmt.Fprint(w, `{"status":"ok"}`)
 	})
 
-	logger.Info("listening", "addr", *flListen, "prefix", *flPrefix)
-	if err := http.ListenAndServe(*flListen, mux); err != nil {
-		logger.Error("server", "error", err)
-		os.Exit(1)
+	// Explicit timeouts: ACME flows are short and chatty, so generous header
+	// + read timeouts but a bounded idle window. Without these, default
+	// net/http leaves connections open indefinitely (Slowloris).
+	srv := &http.Server{
+		Addr:              *flListen,
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
+
+	// Graceful shutdown: SIGTERM (k8s eviction) drains in-flight ACME requests
+	// before exit so defer ca.Close() actually runs.
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+	defer stop()
+
+	serverErr := make(chan error, 1)
+	go func() {
+		logger.Info("listening", "addr", *flListen, "prefix", *flPrefix)
+		serverErr <- srv.ListenAndServe()
+	}()
+
+	select {
+	case err := <-serverErr:
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logger.Error("server", "error", err)
+			os.Exit(1)
+		}
+	case <-ctx.Done():
+		logger.Info("shutdown signal received, draining")
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			logger.Error("graceful shutdown", "error", err)
+		}
 	}
 }
 
