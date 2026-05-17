@@ -1,6 +1,8 @@
 # nanoca-server -- standalone ACME CA for Kubernetes
 # CA cert/key are NOT baked in; they come from a K8s Secret volume mount.
 # Cloudflared is NOT included; it runs as a separate sidecar container.
+# fleet-acme-enroll is the Linux endpoint client and ships as a separate
+# release artifact, not in this server image.
 
 FROM golang:1.26-alpine AS build
 RUN apk add --no-cache git
@@ -11,18 +13,14 @@ COPY verifiers/ verifiers/
 COPY cmd/ cmd/
 RUN go mod download
 RUN CGO_ENABLED=0 GOOS=linux go build -o /nanoca-server ./cmd/nanoca-server
-WORKDIR /build/fleet-acme-enroll
-COPY fleet-acme-enroll/ .
-RUN go mod download
-RUN CGO_ENABLED=0 GOOS=linux go build -o /fleet-acme-enroll .
 
-FROM alpine:latest
-RUN apk add --no-cache ca-certificates curl
+FROM alpine:3.21
+RUN apk add --no-cache ca-certificates
 RUN adduser -D -u 65534 nanoca
 COPY --from=build /nanoca-server /usr/local/bin/nanoca-server
-COPY --from=build /fleet-acme-enroll /usr/local/bin/fleet-acme-enroll
 RUN mkdir -p /var/lib/nanoca /etc/nanoca && chown -R nanoca:nanoca /var/lib/nanoca
 USER nanoca
 EXPOSE 8443
-HEALTHCHECK --interval=30s --timeout=5s CMD curl -f http://localhost:8443/health || exit 1
+# No HEALTHCHECK: Kubernetes startup/liveness/readiness probes own this. The
+# directive only fires under plain Docker and previously forced a curl install.
 ENTRYPOINT ["nanoca-server"]

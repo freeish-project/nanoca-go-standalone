@@ -1,6 +1,6 @@
 module github.com/freeish-project/nanoca-go-standalone/fleet-acme-enroll
 
-go 1.22.0
+go 1.24.0
 
 require (
 	github.com/fxamacker/cbor/v2 v2.9.0

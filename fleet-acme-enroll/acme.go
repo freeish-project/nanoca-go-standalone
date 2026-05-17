@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/asn1"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -15,6 +16,12 @@ import (
 	"time"
 
 	"github.com/go-jose/go-jose/v4"
+)
+
+// OIDs for ACME PermanentIdentifier SAN (RFC 4043 + RFC 8555 §7.1.6).
+var (
+	oidSubjectAltName       = asn1.ObjectIdentifier{2, 5, 29, 17}
+	oidPermanentIdentifier  = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 8, 3}
 )
 
 type acmeClient struct {
@@ -302,7 +309,31 @@ func (c *acmeClient) pollStatus(url string, extractStatus func([]byte) string) e
 // signedPost sends a JWS-signed POST to url. If embedJWK is true, the public
 // key is embedded in the header (for new-account). Otherwise, the kid
 // (account URL) is used. A nil payload means POST-as-GET (empty payload).
+//
+// Per RFC 8555 §6.5, a badNonce error response carries a fresh Replay-Nonce
+// header and the client MUST retry with that nonce. We retry exactly once.
 func (c *acmeClient) signedPost(url string, payload any, embedJWK bool) (*http.Response, error) {
+	resp, err := c.signedPostOnce(url, payload, embedJWK)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode < 400 {
+		return resp, nil
+	}
+
+	// Drain body so we can both inspect it for badNonce and hand a fresh
+	// reader to the caller's error path.
+	bodyBytes, readErr := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if readErr == nil && isBadNonce(bodyBytes) {
+		c.logger.Info("badNonce, retrying with fresh nonce")
+		return c.signedPostOnce(url, payload, embedJWK)
+	}
+	resp.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+	return resp, nil
+}
+
+func (c *acmeClient) signedPostOnce(url string, payload any, embedJWK bool) (*http.Response, error) {
 	var payloadBytes []byte
 	if payload == nil {
 		payloadBytes = []byte{} // POST-as-GET: empty payload
@@ -345,11 +376,23 @@ func (c *acmeClient) signedPost(url string, payload any, embedJWK bool) (*http.R
 		return nil, err
 	}
 
-	// Capture nonce from every response.
+	// Capture nonce from every response (including errors).
 	if n := resp.Header.Get("Replay-Nonce"); n != "" {
 		c.nonce = n
 	}
 	return resp, nil
+}
+
+// isBadNonce reports whether an ACME error response body is a badNonce
+// problem document (RFC 8555 §6.5).
+func isBadNonce(body []byte) bool {
+	var problem struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(body, &problem); err != nil {
+		return false
+	}
+	return problem.Type == "urn:ietf:params:acme:error:badNonce"
 }
 
 func (c *acmeClient) readError(resp *http.Response) error {
@@ -367,7 +410,56 @@ func findChallenge(challenges []acmeChallenge, typ string) *acmeChallenge {
 }
 
 func createCSR(key *ecdsa.PrivateKey, identifier string) ([]byte, error) {
+	sanExt, err := permanentIdentifierSAN(identifier)
+	if err != nil {
+		return nil, fmt.Errorf("encoding PermanentIdentifier SAN: %w", err)
+	}
 	return x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{
-		Subject: pkix.Name{CommonName: identifier},
+		Subject:         pkix.Name{CommonName: identifier},
+		ExtraExtensions: []pkix.Extension{sanExt},
 	}, key)
+}
+
+// permanentIdentifierSAN builds a subjectAltName extension whose only entry
+// is an otherName with type-id PermanentIdentifier (OID 1.3.6.1.5.5.7.8.3)
+// carrying the device identifier. Matches what Apple's Managed Device
+// Attestation flow emits and what ACME servers expect for the
+// permanent-identifier order identifier (RFC 8555 §7.1.6).
+func permanentIdentifierSAN(identifier string) (pkix.Extension, error) {
+	// PermanentIdentifier ::= SEQUENCE { identifierValue UTF8String OPTIONAL,
+	//                                    assigner        OBJECT IDENTIFIER OPTIONAL }
+	// Pre-encode the [0] EXPLICIT wrapper here. asn1.Marshal on a RawValue
+	// with FullBytes set uses the bytes verbatim, so we can't lean on the
+	// `tag:0,explicit` struct tag to add the wrapper for us.
+	explicitPID, err := asn1.MarshalWithParams(struct {
+		Value string `asn1:"utf8"`
+	}{Value: identifier}, "tag:0,explicit")
+	if err != nil {
+		return pkix.Extension{}, err
+	}
+
+	// OtherName ::= SEQUENCE { type-id OBJECT IDENTIFIER,
+	//                          value   [0] EXPLICIT ANY DEFINED BY type-id }
+	otherNameBytes, err := asn1.Marshal(struct {
+		TypeID asn1.ObjectIdentifier
+		Value  asn1.RawValue
+	}{
+		TypeID: oidPermanentIdentifier,
+		Value:  asn1.RawValue{FullBytes: explicitPID},
+	})
+	if err != nil {
+		return pkix.Extension{}, err
+	}
+
+	// GeneralName CHOICE otherName is [0] IMPLICIT, so the outer SEQUENCE
+	// tag (0x30) becomes context-specific constructed [0] (0xA0).
+	otherNameBytes[0] = 0xa0
+
+	// SubjectAltName ::= SEQUENCE OF GeneralName
+	sanBytes, err := asn1.Marshal([]asn1.RawValue{{FullBytes: otherNameBytes}})
+	if err != nil {
+		return pkix.Extension{}, err
+	}
+
+	return pkix.Extension{Id: oidSubjectAltName, Value: sanBytes}, nil
 }

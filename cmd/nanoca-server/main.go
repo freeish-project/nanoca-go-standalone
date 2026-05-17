@@ -159,13 +159,19 @@ func main() {
 	}
 
 	if *flEnableTPM {
-		// Fetch TPM vendor root CAs on startup.
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-		if err := tpm.FetchRoots(ctx, logger, *flTPMRootsDir); err != nil {
-			logger.Error("fetching TPM roots", "error", err)
-			os.Exit(1)
+		// Fetch TPM vendor root CAs on startup. Transient network failures
+		// should not CrashLoop the pod -- fall back to whatever's already
+		// cached on disk and only fail when no roots load at all.
+		fetchCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		if err := tpm.FetchRoots(fetchCtx, logger, *flTPMRootsDir); err != nil {
+			logger.Warn("fetching TPM roots failed, will rely on cached copy", "error", err)
 		}
 		cancel()
+
+		if _, count, err := tpm.LoadRootsFromDir(*flTPMRootsDir); err != nil || count == 0 {
+			logger.Error("no TPM vendor roots available after fetch", "error", err, "loaded", count)
+			os.Exit(1)
+		}
 
 		// Start daily background refresh.
 		stopRefresh := tpm.StartPeriodicRefresh(logger, *flTPMRootsDir, 24*time.Hour)
